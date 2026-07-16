@@ -30,7 +30,7 @@ function changePage(page) {
 
 const selectedImage = ref(null)
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ai-pjt.onrender.com'
 const PAGE_STORAGE_KEY = 'seoulMissionPage'
 const page = ref('onboarding')
 const pageHistory = []
