@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import seoulOnboardingImage from './assets/seoul-onboarding.png'
 import {
@@ -30,8 +30,11 @@ function changePage(page) {
 
 const selectedImage = ref(null)
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ai-pjt.onrender.com'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
+const PAGE_STORAGE_KEY = 'seoulMissionPage'
 const page = ref('onboarding')
+const pageHistory = []
+let navigatingBack = false
 const nickname = ref('')
 const password = ref('')
 const currentPassword = ref('')
@@ -129,15 +132,55 @@ const inProgressCourses = computed(() => progressCourses.value.filter((course) =
 const completedCourses = computed(() => progressCourses.value.filter((course) => course.status === 'completed'))
 const isEditingPost = computed(() => page.value === 'community-edit')
 
-onMounted(() => {
+watch(page, (currentPage, previousPage) => {
+  if (!navigatingBack && previousPage && previousPage !== 'onboarding' && previousPage !== currentPage) {
+    pageHistory.push(previousPage)
+  }
+  navigatingBack = false
+  if (currentUser.value && currentPage !== 'onboarding') {
+    sessionStorage.setItem(PAGE_STORAGE_KEY, currentPage)
+  }
+})
+
+function goBack(fallback = 'home') {
+  const previousPage = pageHistory.pop()
+  navigatingBack = true
+  if (previousPage) {
+    page.value = previousPage
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+  if (fallback === 'chat') void openChat()
+  else if (fallback === 'my-courses') openMyCourses()
+  else if (fallback === 'community') void openCommunity()
+  else void openHome()
+}
+
+onMounted(async () => {
   const saved = localStorage.getItem('seoulMissionUser')
   if (!saved) return
   try {
     const user = JSON.parse(saved)
+    if (!user?.id || !user?.nickname) throw new Error('Invalid saved user')
     currentUser.value = user
     nickname.value = user.nickname || ''
+    const savedPage = sessionStorage.getItem(PAGE_STORAGE_KEY) || 'home'
+    if (savedPage === 'chat' || savedPage === 'course-detail') {
+      await openChat()
+    } else if (['my-courses', 'course-progress', 'mission-checkin', 'checkin-success', 'course-complete'].includes(savedPage)) {
+      openMyCourses()
+    } else if (['community', 'community-write', 'community-edit', 'community-detail'].includes(savedPage)) {
+      await openCommunity()
+    } else if (savedPage === 'my-page') {
+      openMyPage()
+    } else {
+      await openHome()
+    }
   } catch {
     localStorage.removeItem('seoulMissionUser')
+    sessionStorage.removeItem(PAGE_STORAGE_KEY)
+    currentUser.value = null
+    page.value = 'onboarding'
   }
 })
 
@@ -392,6 +435,7 @@ function continueCourse() {
 
 function logout() {
   localStorage.removeItem('seoulMissionUser')
+  sessionStorage.removeItem(PAGE_STORAGE_KEY)
   currentUser.value = null
   nickname.value = ''
   password.value = ''
@@ -867,7 +911,7 @@ function formatDate(value) {
       </template>
 
       <template v-else-if="page === 'course-detail' && selectedTravelCourse">
-        <header class="course-flow-header"><button class="back-home-button" @click="openChat"><span>←</span> 추천</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><div class="desktop-menu"><button @click="openHome">홈</button><button class="active" @click="openChat">코스 추천</button><button @click="openMyCourses">여행 로그</button><button @click="openCommunity">커뮤니티</button><button @click="openMyPage">마이페이지</button></div></header>
+        <header class="course-flow-header"><button class="back-home-button" @click="goBack('chat')"><span>←</span> 이전</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><div class="desktop-menu"><button @click="openHome">홈</button><button class="active" @click="openChat">코스 추천</button><button @click="openMyCourses">여행 로그</button><button @click="openCommunity">커뮤니티</button><button @click="openMyPage">마이페이지</button></div></header>
         <section class="course-detail-page">
           <div class="course-detail-hero"><img :src="selectedTravelCourse.image_url" :alt="selectedTravelCourse.title"><div><div class="course-badges"><span class="theme-badge">{{ selectedTravelCourse.district }}</span><span v-for="category in selectedTravelCourse.categories" :key="category" :class="['category-chip', categoryTone[category]]">{{ category }}</span></div><h1>{{ selectedTravelCourse.title }}</h1><p>{{ selectedTravelCourse.reason }}</p><div>◷ 약 {{ selectedTravelCourse.duration_hours }}시간　⌖ 총 {{ selectedTravelCourse.total_distance_km }}km　♙ {{ selectedTravelCourse.stamp_count }}개</div></div></div>
           <div class="course-mission-overview"><div class="section-head"><h2>코스 미션</h2><small>같은 구 안에서 가까운 순서대로 방문하세요</small></div><div class="overview-mission-list"><article v-for="(place, index) in selectedTravelCourse.places" :key="place.id"><span>{{ index + 1 }}</span><img :src="place.firstimage" :alt="place.title"><div><div class="place-category"><b :class="categoryTone[place.content_type]">{{ place.content_type }}</b><em v-if="index > 0">이전 장소에서 {{ place.distance_from_previous_km }}km</em></div><strong>{{ place.title }}</strong><p>{{ place.addr1 }}</p><small>♙ 스탬프 +1</small></div><i>{{ index === 0 ? '출발' : '다음' }}</i></article></div></div>
@@ -876,7 +920,7 @@ function formatDate(value) {
       </template>
 
       <template v-else-if="page === 'course-progress' && activeProgress">
-        <header class="course-flow-header"><button class="back-home-button" @click="openMyCourses"><span>←</span> 코스</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><div class="desktop-menu"><button @click="openHome">홈</button><button @click="openChat">코스 추천</button><button class="active" @click="openMyCourses">여행 로그</button><button @click="openCommunity">커뮤니티</button><button @click="openMyPage">마이페이지</button></div></header>
+        <header class="course-flow-header"><button class="back-home-button" @click="goBack('my-courses')"><span>←</span> 이전</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><div class="desktop-menu"><button @click="openHome">홈</button><button @click="openChat">코스 추천</button><button class="active" @click="openMyCourses">여행 로그</button><button @click="openCommunity">커뮤니티</button><button @click="openMyPage">마이페이지</button></div></header>
         <section class="mission-progress-page">
           <div class="flow-title"><span>{{ activeProgress.theme }}</span><h1>{{ activeProgress.title }}</h1><p>{{ activeProgress.completed_missions }} / {{ activeProgress.total_missions }} 미션 완료</p></div>
           <div class="course-progress-bar"><div><b>코스 진행률</b><strong>{{ activeProgress.progress_percent }}%</strong></div><i><em :style="{ width: `${activeProgress.progress_percent}%` }"></em></i></div>
@@ -885,7 +929,7 @@ function formatDate(value) {
       </template>
 
       <template v-else-if="page === 'mission-checkin' && activeMission && activeProgress">
-        <header class="course-flow-header"><button class="back-home-button" @click="page = 'course-progress'"><span>←</span> 이전</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><b class="mission-count">{{ activeMission.sequence_no }} / {{ activeProgress.total_missions }}</b></header>
+        <header class="course-flow-header"><button class="back-home-button" @click="goBack('my-courses')"><span>←</span> 이전</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><b class="mission-count">{{ activeMission.sequence_no }} / {{ activeProgress.total_missions }}</b></header>
         <section class="checkin-page"><div class="flow-title center"><span>현재 미션</span><h1>{{ activeMission.title }}</h1><p>{{ activeMission.district }}</p></div><img class="checkin-cover" :src="activeMission.image_url" :alt="activeMission.title"><div class="mission-instruction"><span>미션 내용</span><h2>{{ activeMission.title }}에서 체크인하기</h2><p>현장에 도착했다면 아래 체크인 버튼을 눌러주세요.</p><div>⌖ {{ activeMission.address || '서울 관광 명소' }}</div></div><button class="primary-flow-button checkin-button" :disabled="progressLoading" @click="checkInMission">⌖ {{ progressLoading ? '체크인 중...' : '체크인하기' }}</button></section>
       </template>
 
@@ -895,7 +939,7 @@ function formatDate(value) {
       </template>
 
       <template v-else-if="page === 'course-complete' && activeProgress">
-        <header class="course-flow-header"><button class="back-home-button" @click="openMyCourses"><span>←</span> 코스</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><div class="desktop-menu"><button @click="openHome">홈</button><button @click="openChat">코스 추천</button><button class="active" @click="openMyCourses">여행 로그</button><button @click="openCommunity">커뮤니티</button><button @click="openMyPage">마이페이지</button></div></header>
+        <header class="course-flow-header"><button class="back-home-button" @click="goBack('my-courses')"><span>←</span> 이전</button><div class="brand"><span>◆</span> SEOUL MISSION TRIP</div><div class="desktop-menu"><button @click="openHome">홈</button><button @click="openChat">코스 추천</button><button class="active" @click="openMyCourses">여행 로그</button><button @click="openCommunity">커뮤니티</button><button @click="openMyPage">마이페이지</button></div></header>
         <section class="course-complete-page"><div class="confetti">✦　·　✧　·　✦</div><div class="complete-medal">★</div><span>{{ activeProgress.theme }} 탐험가</span><h1>축하합니다!</h1><p>{{ activeProgress.title }}의<br>모든 미션을 완료했어요!</p><div><span>획득한 스탬프 <b>{{ activeProgress.completed_missions }} / {{ activeProgress.total_missions }}개</b></span><span>완료 시간 <b>{{ formatDate(activeProgress.completed_at) }}</b></span></div><section class="completed-missions"><div class="section-head"><h2>완료한 미션</h2><small>{{ activeProgress.missions.length }}개의 미션을 모두 완료했어요</small></div><div class="mission-timeline"><article v-for="mission in activeProgress.missions" :key="mission.id" class="completed"><span>✓</span><img v-if="mission.image_url" :src="mission.image_url" :alt="mission.title"><div><small>완료</small><h2>{{ mission.title }}</h2><p>{{ mission.address }}</p><b>♙ 스탬프 +{{ mission.stamp_reward }}</b></div><i>완료</i></article></div></section><button class="primary-flow-button" @click="openMyCourses">진행 코스 목록 보기</button></section>
       </template>
 
@@ -1020,7 +1064,7 @@ function formatDate(value) {
       </template>
 
       <template v-else-if="page === 'community-detail' && selectedPost"> <!-- 커뮤니티 상세 -->
-        <header class="community-header"><button class="back-home-button" @click="openCommunity"><span>←</span> 목록</button><h1>글 상세보기</h1><div class="community-user">♙ 익명 사용자</div></header>
+        <header class="community-header"><button class="back-home-button" @click="goBack('community')"><span>←</span> 이전</button><h1>글 상세보기</h1><div class="community-user">♙ 익명 사용자</div></header>
         <article class="post-detail">
           <div class="post-author"><span class="author-avatar">∞</span><div><b>익명 사용자</b><small>{{ formatDate(selectedPost.created_at) }} · 조회 {{ selectedPost.view_count }}</small></div><div class="post-author-actions"><button type="button" class="bookmark-detail-button" :class="{ bookmarked: selectedPost.bookmarked }" :disabled="bookmarkingPostIds.includes(selectedPost.id)" @click.prevent="togglePostBookmark(selectedPost)">{{ selectedPost.bookmarked ? '★ 북마크됨' : '☆ 북마크' }}</button><button v-if="selectedPost.can_edit" class="edit-post-button" :disabled="communityLoading" @click="openCommunityEdit">수정하기</button><button v-if="selectedPost.can_delete" class="delete-post-button" :disabled="communityLoading" @click="deleteSelectedPost">삭제하기</button></div></div>
           <div class="post-detail-title"><h1>{{ selectedPost.title }}</h1><span>⌖ {{ selectedPost.district }}</span></div>
