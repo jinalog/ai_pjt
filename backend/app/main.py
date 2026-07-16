@@ -1,3 +1,6 @@
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -7,9 +10,7 @@ from app.database import (
     CONTENT_TYPES,
     SEOUL_DISTRICTS,
     abandon_user_course_progress,
-    backfill_place_districts,
     complete_mission,
-    count_places,
     create_community_post,
     delete_community_post,
     detect_list_query,
@@ -19,8 +20,7 @@ from app.database import (
     get_community_statistics,
     get_user_course_progress,
     has_travel_intent,
-    init_db,
-    load_json_data,
+    initialize_database,
     list_courses,
     list_community_images,
     list_community_posts,
@@ -31,8 +31,6 @@ from app.database import (
     list_places,
     login_user,
     recommend_courses,
-    seed_community_posts,
-    seed_test_data,
     start_course_progress,
     check_in_course_mission,
     change_user_password,
@@ -288,25 +286,53 @@ class CheckInOut(BaseModel):
     course_completed: bool
 
 
-app = FastAPI(title="AI Team8 Travel API", version="1.0.0")
+def get_allowed_origins() -> list[str]:
+    """Return local origins plus origins configured in Render.
+
+    Render backend environment variable example:
+    CORS_ORIGINS=https://your-frontend.onrender.com
+    Multiple origins can be separated with commas.
+    """
+    origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+    configured_origins = os.getenv("CORS_ORIGINS", "")
+    for origin in configured_origins.split(","):
+        normalized = origin.strip().rstrip("/")
+        if normalized:
+            origins.append(normalized)
+
+    return list(dict.fromkeys(origins))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    result = initialize_database()
+
+    print(f"[DB] path={result['database_path']}")
+    print(f"[DB] existed={result['database_existed']}")
+    print(f"[DB] imported_places={result['imported_places']}")
+    print(f"[DB] updated_districts={result['updated_districts']}")
+    print(f"[DB] total_places={result['total_places']}")
+
+    yield
+
+
+app = FastAPI(
+    title="AI Team8 Travel API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173","https://ai-pjt-1.onrender.com"],
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def startup_event() -> None:
-    init_db()
-    if count_places() == 0:
-        load_json_data()
-    backfill_place_districts()
-    seed_test_data()
-    seed_community_posts()
 
 
 @app.get("/health")

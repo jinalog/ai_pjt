@@ -1622,9 +1622,36 @@ def list_popular_courses(limit: int = 10) -> list[dict]:
         return [dict(row) for row in rows]
 
 
-if __name__ == "__main__":
+def initialize_database() -> dict:
+    """Create the SQLite database and import only the required tourism data.
+
+    The local app.db file is excluded by .gitignore. On Render, SQLite creates
+    a new app.db automatically when the deployed instance has no database file.
+    User-generated tables start empty because sample community data is not seeded.
+    """
+    database_existed = DB_PATH.exists()
+
     init_db()
-    count = load_json_data()
-    seed_count = seed_test_data()
-    print(f"Imported {count} items into {DB_PATH}")
-    print(f"Seeded {seed_count} test course/mission records")
+
+    imported_places = 0
+    if count_places() == 0:
+        imported_places = load_json_data()
+
+    updated_districts = backfill_place_districts()
+
+    return {
+        "database_path": str(DB_PATH),
+        "database_existed": database_existed,
+        "imported_places": imported_places,
+        "updated_districts": updated_districts,
+        "total_places": count_places(),
+    }
+
+
+if __name__ == "__main__":
+    result = initialize_database()
+    print(f"Database path: {result['database_path']}")
+    print(f"Database existed: {result['database_existed']}")
+    print(f"Imported places: {result['imported_places']}")
+    print(f"Updated districts: {result['updated_districts']}")
+    print(f"Total places: {result['total_places']}")
